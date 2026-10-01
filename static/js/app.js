@@ -581,6 +581,7 @@ function switchToSession(id) {
 
   renderSessionTabs();
   updateActiveSessionsBanner();
+  updatePhysicalTouchBarState();
 }
 
 // Disconnect a specific session
@@ -602,6 +603,7 @@ function disconnectSession(id) {
 
   renderSessionTabs();
   updateActiveSessionsBanner();
+  updatePhysicalTouchBarState();
   render();
 }
 
@@ -681,6 +683,7 @@ function setupSessionBar() {
   document.getElementById('sessionCatalogBtn').addEventListener('click', () => {
     document.getElementById('rdpSessionView').classList.remove('active');
     updateActiveSessionsBanner();
+    updatePhysicalTouchBarState();
     render();
     showToast('Sessions remain active in background. Click banner or card to resume.');
   });
@@ -689,6 +692,7 @@ function setupSessionBar() {
   document.getElementById('sessionAddConnectionBtn').addEventListener('click', () => {
     document.getElementById('rdpSessionView').classList.remove('active');
     updateActiveSessionsBanner();
+    updatePhysicalTouchBarState();
     render();
     showToast('Select any PC from the catalog to connect concurrently.');
   });
@@ -898,3 +902,35 @@ function showToast(message) {
     setTimeout(() => toast.remove(), 250);
   }, 2500);
 }
+
+// Physical Touch Bar Lifecycle Management (Only show when RDP session active & window focused)
+function updatePhysicalTouchBarState() {
+  const sessionView = document.getElementById('rdpSessionView');
+  const isSessionViewActive = sessionView && sessionView.classList.contains('active');
+  const hasActiveSession = state.activeSessions && state.activeSessions.size > 0;
+  const isDocumentVisible = !document.hidden;
+
+  const shouldBeActive = isSessionViewActive && hasActiveSession && isDocumentVisible;
+  fetch(`/api/touchbar/state?active=${shouldBeActive ? 1 : 0}`, { method: 'POST' }).catch(() => {});
+}
+
+window.addEventListener('focus', () => {
+  updatePhysicalTouchBarState();
+});
+
+window.addEventListener('blur', () => {
+  fetch('/api/touchbar/state?active=0', { method: 'POST' }).catch(() => {});
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    fetch('/api/touchbar/state?active=0', { method: 'POST' }).catch(() => {});
+  } else {
+    updatePhysicalTouchBarState();
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  fetch('/api/touchbar/state?active=0', { method: 'POST' }).catch(() => {});
+});
+

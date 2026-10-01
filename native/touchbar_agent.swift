@@ -4,9 +4,8 @@ import Foundation
 // ========================================================
 // Rdp Sensei - Physical Touch Bar Native Agent for macOS
 // Zero external dependencies. Uses standard macOS AppKit.
-// Features scrollable bar with compact keys so ALL keys
-// (Esc, Del, Home, End, PgUp, PgDn, Ins, PrtSc, Alt+Tab,
-//  Win, F1-F12, CAD) fit and swipe smoothly.
+// Auto-dismisses Touch Bar when user switches to other apps.
+// Only presents when RDP session is active AND app is in focus.
 // ========================================================
 
 final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
@@ -15,6 +14,8 @@ final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
     var touchBar: NSTouchBar?
     var serverPort: Int = 8855
     var isPresented: Bool = false
+    var isSessionActive: Bool = false
+    var isAppFrontmost: Bool = true
     
     struct KeyItem {
         let id: String
@@ -24,7 +25,6 @@ final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
         let category: String // "danger", "accent", "nav", "fn", "close"
     }
     
-    // Ordered so navigation and edit keys (Del, Home, End, etc.) are up front alongside Esc and Alt+Tab!
     let keys: [KeyItem] = [
         // Primary Essential Controls
         KeyItem(id: "esc", title: "Esc", keyName: "Escape", width: 44, category: "danger"),
@@ -64,6 +64,56 @@ final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
         self.touchBar = tb
     }
     
+    func setupAppFocusObserver() {
+        checkFrontmost()
+        
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.checkFrontmost()
+        }
+        
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didDeactivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.checkFrontmost()
+        }
+    }
+    
+    func checkFrontmost() {
+        guard let front = NSWorkspace.shared.frontmostApplication else { return }
+        let name = (front.localizedName ?? "").lowercased()
+        let bid = (front.bundleIdentifier ?? "").lowercased()
+        
+        // Frontmost must be Rdp Sensei or the browser hosting Rdp Sensei
+        let isOurs = name.contains("rdp sensei") ||
+                     name.contains("chrome") ||
+                     name.contains("edge") ||
+                     name.contains("brave") ||
+                     name.contains("arc") ||
+                     bid.contains("rdp-sensei")
+                     
+        isAppFrontmost = isOurs
+        updateTouchBar()
+    }
+    
+    func setSessionActive(_ active: Bool) {
+        isSessionActive = active
+        updateTouchBar()
+    }
+    
+    func updateTouchBar() {
+        if isSessionActive && isAppFrontmost {
+            present()
+        } else {
+            dismiss()
+        }
+    }
+    
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         if identifier.rawValue == "rdp_sensei_scroll_bar" {
             let item = NSCustomTouchBarItem(identifier: identifier)
@@ -81,7 +131,6 @@ final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
                 btn.bezelStyle = .rounded
                 btn.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
                 
-                // Color themes
                 switch k.category {
                 case "danger":
                     btn.bezelColor = NSColor(red: 0.82, green: 0.20, blue: 0.20, alpha: 1.0)
@@ -141,7 +190,7 @@ final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
             return
         }
         
-        // 1. Post key event to local Rdp Sensei Go server
+        // Post key event to local Rdp Sensei Go server
         if let url = URL(string: "http://127.0.0.1:\(serverPort)/api/touchbar/press?key=\(keyName)") {
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
@@ -157,9 +206,9 @@ final class TouchBarAgent: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
                 DispatchQueue.main.async {
                     switch cmd {
                     case "show":
-                        self.present()
+                        self.setSessionActive(true)
                     case "hide":
-                        self.dismiss()
+                        self.setSessionActive(false)
                     case "quit":
                         self.dismiss()
                         exit(0)
@@ -183,11 +232,7 @@ if let idx = args.firstIndex(of: "-port"), idx + 1 < args.count, let p = Int(arg
 }
 
 agent.setupTouchBar()
+agent.setupAppFocusObserver()
 agent.startStdinLoop()
-
-// If launched with -show, present immediately
-if args.contains("-show") {
-    agent.present()
-}
 
 app.run()
