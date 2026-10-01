@@ -1,0 +1,14 @@
+# Binaries and build outputs
+build/
+rdp-sensei
+rdp-app
+*.exe
+native/touchbar_agent
+Rdp Sensei.app
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Local storage data
+data/

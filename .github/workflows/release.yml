@@ -1,0 +1,63 @@
+name: Release Rdp Sensei
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build WebAssembly RDP Engine
+        run: |
+          mkdir -p static
+          cd wasm && GOOS=js GOARCH=wasm go build -o ../static/main.wasm .
+          cd ..
+
+      - name: Build Binaries
+        run: |
+          mkdir -p build/dist
+          
+          # macOS Apple Silicon
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/dist/rdp-sensei-darwin-arm64 .
+          
+          # macOS Intel
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/dist/rdp-sensei-darwin-amd64 .
+          
+          # Windows 64-bit
+          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o build/dist/rdp-sensei-windows-amd64.exe .
+          
+          # Linux 64-bit
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o build/dist/rdp-sensei-linux-amd64 .
+
+      - name: Package macOS App Bundle
+        run: |
+          mkdir -p "build/Rdp Sensei.app/Contents/MacOS"
+          mkdir -p "build/Rdp Sensei.app/Contents/Resources"
+          cp build/dist/rdp-sensei-darwin-arm64 "build/Rdp Sensei.app/Contents/MacOS/Rdp Sensei"
+          cp resources/Info.plist "build/Rdp Sensei.app/Contents/Info.plist"
+          cp resources/AppIcon.icns "build/Rdp Sensei.app/Contents/Resources/AppIcon.icns"
+          chmod +x "build/Rdp Sensei.app/Contents/MacOS/Rdp Sensei"
+          
+          cd build && zip -r rdp-sensei-macos-app.zip "Rdp Sensei.app" && cd ..
+          mv build/rdp-sensei-macos-app.zip build/dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/dist/*
+          generate_release_notes: true
