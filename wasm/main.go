@@ -341,7 +341,7 @@ func jsMouseDown(_ js.Value, args []js.Value) any {
 		btn = args[2].Int()
 	}
 	if sess != nil && sess.client != nil {
-		sess.client.MouseDown(x, y, btn)
+		sess.client.MouseDown(btn, x, y)
 	}
 	return nil
 }
@@ -364,7 +364,7 @@ func jsMouseUp(_ js.Value, args []js.Value) any {
 		btn = args[2].Int()
 	}
 	if sess != nil && sess.client != nil {
-		sess.client.MouseUp(x, y, btn)
+		sess.client.MouseUp(btn, x, y)
 	}
 	return nil
 }
