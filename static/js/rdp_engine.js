@@ -17,6 +17,7 @@ class RDPSession {
     this.pointerCache = new Map();
     this.audioCtx = null;
     this.audioNextAt = 0;
+    this.videoDecoder = null;
     this.clipboardSyncPromise = Promise.resolve();
   }
 
@@ -207,6 +208,10 @@ class RDPEngine {
       s.connected = false;
       s.status = 'disconnected';
       s.closeAudio();
+      if (s.videoDecoder) {
+        try { s.videoDecoder.close(); } catch (_) {}
+        s.videoDecoder = null;
+      }
     }
 
     this.sessions.delete(sid);
@@ -361,6 +366,38 @@ class RDPEngine {
     }
   }
 
+  sendCtrlCombo(code, sessionId) {
+    const s = sessionId ? this.sessions.get(sessionId) : this.getActiveSession();
+    if (!s || !s.connected) return;
+    if (typeof window.rdpKeyDown === 'function') {
+      window.rdpKeyDown(s.id, 'ControlLeft');
+      window.rdpKeyDown(s.id, code);
+      setTimeout(() => {
+        if (typeof window.rdpKeyUp === 'function') {
+          window.rdpKeyUp(s.id, code);
+          window.rdpKeyUp(s.id, 'ControlLeft');
+        }
+      }, 70);
+    }
+  }
+
+  sendCtrlShiftCombo(code, sessionId) {
+    const s = sessionId ? this.sessions.get(sessionId) : this.getActiveSession();
+    if (!s || !s.connected) return;
+    if (typeof window.rdpKeyDown === 'function') {
+      window.rdpKeyDown(s.id, 'ControlLeft');
+      window.rdpKeyDown(s.id, 'ShiftLeft');
+      window.rdpKeyDown(s.id, code);
+      setTimeout(() => {
+        if (typeof window.rdpKeyUp === 'function') {
+          window.rdpKeyUp(s.id, code);
+          window.rdpKeyUp(s.id, 'ShiftLeft');
+          window.rdpKeyUp(s.id, 'ControlLeft');
+        }
+      }, 70);
+    }
+  }
+
   updateLayouts() {
     for (const sid of this.sessions.keys()) {
       this.updateLayout(sid);
@@ -434,7 +471,66 @@ class RDPEngine {
     }
   }
 
-  handleH264(sessionId, destX, destY, w, h, isKey, uint8Data) {}
+  handleH264(sessionId, destX, destY, w, h, isKey, uint8Data) {
+    const s = this.sessions.get(sessionId);
+    if (!s || !s.ctx2d) return;
+
+    if (typeof VideoDecoder === 'undefined') {
+      return; // WebCodecs not supported
+    }
+
+    if (!s.videoDecoder) {
+      try {
+        s.videoDecoder = new VideoDecoder({
+          output: (frame) => {
+            try {
+              const dx = s.lastH264X ?? 0;
+              const dy = s.lastH264Y ?? 0;
+              const dw = s.lastH264W || frame.displayWidth;
+              const dh = s.lastH264H || frame.displayHeight;
+              s.ctx2d.drawImage(frame, dx, dy, dw, dh);
+            } catch (err) {
+              console.warn('[WebCodecs] Frame draw error:', err);
+            } finally {
+              frame.close();
+            }
+          },
+          error: (e) => {
+            console.warn('[WebCodecs] VideoDecoder error:', e);
+            if (s.videoDecoder) {
+              try { s.videoDecoder.close(); } catch (_) {}
+              s.videoDecoder = null;
+            }
+          }
+        });
+
+        s.videoDecoder.configure({
+          codec: 'avc1.42001f', // H.264 Baseline Profile level 3.1
+          optimizeForLatency: true,
+        });
+      } catch (err) {
+        console.warn('[WebCodecs] VideoDecoder configure failed:', err);
+        s.videoDecoder = null;
+        return;
+      }
+    }
+
+    try {
+      s.lastH264X = destX;
+      s.lastH264Y = destY;
+      s.lastH264W = w;
+      s.lastH264H = h;
+
+      const chunk = new EncodedVideoChunk({
+        type: isKey ? 'key' : 'delta',
+        timestamp: performance.now() * 1000,
+        data: uint8Data,
+      });
+      s.videoDecoder.decode(chunk);
+    } catch (_) {
+      // Decode dropped or frame sync issue
+    }
+  }
 
   handlePointerHide(sessionId) {
     const s = this.sessions.get(sessionId);
@@ -573,6 +669,66 @@ class RDPEngine {
         e.stopPropagation();
         this.sendAltTab(active.id);
         return;
+      }
+
+      // Mac Shortcut Bridge: Map Cmd+C/V/X/A/Z/S/F to Windows Ctrl combos
+      const useMacShortcuts = active.device && active.device.macShortcuts !== false;
+      if (useMacShortcuts && e.metaKey && !e.ctrlKey) {
+        if (e.code === 'KeyC') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyC', active.id);
+          return;
+        } else if (e.code === 'KeyV') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyV', active.id);
+          return;
+        } else if (e.code === 'KeyX') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyX', active.id);
+          return;
+        } else if (e.code === 'KeyA') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyA', active.id);
+          return;
+        } else if (e.code === 'KeyZ') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.shiftKey) {
+            this.sendCtrlShiftCombo('KeyZ', active.id);
+          } else {
+            this.sendCtrlCombo('KeyZ', active.id);
+          }
+          return;
+        } else if (e.code === 'KeyY') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyY', active.id);
+          return;
+        } else if (e.code === 'KeyS') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyS', active.id);
+          return;
+        } else if (e.code === 'KeyF') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyF', active.id);
+          return;
+        } else if (e.code === 'KeyW') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlCombo('KeyW', active.id);
+          return;
+        } else if (e.code === 'Escape' && (e.shiftKey || e.altKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendCtrlShiftCombo('Escape', active.id);
+          return;
+        }
       }
 
       if (e.code === 'Tab' || e.code === 'AltLeft' || e.code === 'AltRight' || e.code.startsWith('Meta') || e.code.startsWith('F')) {

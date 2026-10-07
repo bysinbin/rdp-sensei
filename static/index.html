@@ -89,6 +89,14 @@
             </svg>
           </button>
 
+          <button class="icon-btn" id="scanLanBtn" title="Scan LAN for Windows PCs (Auto-Discovery)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9"></circle>
+              <line x1="12" y1="12" x2="16.5" y2="7.5"></line>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+
           <div class="view-switchers">
             <button class="icon-btn active" id="viewGridBtn" title="Grid View">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -195,6 +203,9 @@
         <button class="session-btn" id="sessionClipboardBtn" title="Synchronize Clipboard">
           <span>Sync Clip</span>
         </button>
+        <button class="session-btn" id="sessionFilesBtn" title="File Sharing & Drop Bridge">
+          <span>📁 Files</span>
+        </button>
         <button class="session-btn" id="sessionPopoutBtn" title="Open this session in a new standalone window">
           <span>↗ Pop-out</span>
         </button>
@@ -219,6 +230,17 @@
           <button class="btn btn-secondary" onclick="closeSessionView()">Return to PCs</button>
           <button class="btn btn-primary" id="sessionRetryBtn">Enter Credentials &amp; Retry</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Drag & Drop File Overlay -->
+    <div class="file-drop-overlay" id="fileDropOverlay">
+      <div class="file-drop-card">
+        <div style="font-size: 40px; margin-bottom: 8px;">📥</div>
+        <h3 style="font-size: 16px; margin-bottom: 6px; color: #fff;">Drop File to Share with PC</h3>
+        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">
+          The file will be uploaded to your shared files bridge.
+        </p>
       </div>
     </div>
 
@@ -373,12 +395,20 @@
             <label class="form-label" for="devHeight">Height (px)</label>
             <input type="number" class="form-input" id="devHeight" value="900" />
           </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label" for="devMacAddress">MAC Address (Optional, for Wake-on-LAN)</label>
+            <input type="text" class="form-input" id="devMacAddress" placeholder="e.g. 00:1A:2B:3C:4D:5E" />
+          </div>
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
           <label class="checkbox-label">
-            <input type="checkbox" id="devSwapAltMeta" checked />
-            <span>Swap Option/Alt with Command (Recommended for Mac keyboards)</span>
+            <input type="checkbox" id="devMacShortcuts" checked />
+            <span>Mac Kısayol Köprüsü (Cmd+C/V/Z/S ➔ Ctrl+C/V/Z/S)</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="devSwapAltMeta" />
+            <span>Swap Option/Alt with Command (Legacy)</span>
           </label>
           <label class="checkbox-label">
             <input type="checkbox" id="devEnableAudio" checked />
@@ -393,6 +423,76 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="modalCancelBtn">Cancel</button>
         <button class="btn btn-primary" id="modalSaveBtn">Save Connection</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAN Auto-Discovery Modal -->
+  <div class="modal-overlay" id="discoveryModal">
+    <div class="modal-dialog" style="width: 580px; max-width: 95vw;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="9"></circle>
+            <line x1="12" y1="12" x2="16.5" y2="7.5"></line>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+          <h2 class="modal-title">LAN Auto-Discovery (Port 3389)</h2>
+        </div>
+        <button class="modal-close-btn" id="discoveryCloseBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+          Scans your local network for active Windows PCs and servers running RDP.
+        </p>
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <input type="text" class="form-input" id="scanSubnetInput" placeholder="Auto-detected subnet (e.g. 192.168.1)" style="flex: 1;" />
+          <button class="btn btn-primary" id="startScanBtn" style="white-space: nowrap;">
+            <span id="scanBtnText">Scan Network</span>
+          </button>
+        </div>
+        <div class="discovery-results" id="discoveryResults">
+          <div style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px;">
+            Click "Scan Network" to discover RDP hosts on your LAN.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="discoveryDoneBtn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- File Transfer / Share Bridge Modal -->
+  <div class="modal-overlay" id="fileSharingModal">
+    <div class="modal-dialog" style="width: 540px; max-width: 95vw;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">📁</span>
+          <h2 class="modal-title">Shared Files Bridge</h2>
+        </div>
+        <button class="modal-close-btn" id="fileSharingCloseBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+          Upload files from your Mac to share them with your remote Windows desktop, or drop any file directly onto the RDP session.
+        </p>
+        <div class="file-upload-zone" id="fileUploadZone">
+          <input type="file" id="filePickerInput" style="display: none;" />
+          <button class="btn btn-primary" onclick="document.getElementById('filePickerInput').click()" style="margin-bottom: 8px;">
+            Choose File to Upload
+          </button>
+          <span style="font-size: 12px; color: var(--text-muted);">or drag &amp; drop files here</span>
+        </div>
+        <div style="margin-top: 16px;">
+          <h4 style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px;">Shared Files</h4>
+          <div class="shared-files-list" id="sharedFilesList">
+            <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;">No shared files yet</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="fileSharingDoneBtn">Close</button>
       </div>
     </div>
   </div>

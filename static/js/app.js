@@ -22,6 +22,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModal();
   setupPasswordPrompt();
   setupPopoutCheck();
+  setupDiscoveryModal();
+  setupFileSharing();
 
   await loadDevices();
   triggerAutoPing();
@@ -73,6 +75,7 @@ function setupToolbar() {
   const searchInput = document.getElementById('searchInput');
   const addBtn = document.getElementById('addPcBtn');
   const pingBtn = document.getElementById('pingAllBtn');
+  const scanLanBtn = document.getElementById('scanLanBtn');
   const gridBtn = document.getElementById('viewGridBtn');
   const listBtn = document.getElementById('viewListBtn');
 
@@ -83,6 +86,9 @@ function setupToolbar() {
 
   addBtn.addEventListener('click', () => openDeviceModal());
   pingBtn.addEventListener('click', () => triggerPingAll());
+  if (scanLanBtn) {
+    scanLanBtn.addEventListener('click', () => openDiscoveryModal());
+  }
 
   gridBtn.addEventListener('click', () => {
     state.viewMode = 'grid';
@@ -273,20 +279,127 @@ function renderGroupedView(container, devices) {
   bindCardEvents(container);
 }
 
-// Render Apps View
+// Render Apps View - Remote Tools & Windows Apps Hub
 function renderAppsView(container) {
+  if (state.devices.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
+        <p style="font-size: 16px; margin-bottom: 8px;">No PCs configured</p>
+        <p style="font-size: 13px;">Add a PC first to launch Windows tools and remote apps.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const selectedDevId = state.activeSessionId || state.devices[0].id;
+  
+  const tools = [
+    { id: 'powershell', name: 'PowerShell', category: 'Admin Tools', icon: '⚡', cmd: 'powershell', desc: 'Windows PowerShell Terminal' },
+    { id: 'cmd', name: 'Command Prompt', category: 'Admin Tools', icon: '💻', cmd: 'cmd', desc: 'Windows Command Line Interpreter' },
+    { id: 'taskmgr', name: 'Task Manager', category: 'Admin Tools', icon: '📊', cmd: 'taskmgr', desc: 'Performance and process monitor' },
+    { id: 'compmgmt', name: 'Computer Management', category: 'Admin Tools', icon: '🗄️', cmd: 'compmgmt.msc', desc: 'Storage, disks, event viewer' },
+    { id: 'regedit', name: 'Registry Editor', category: 'Admin Tools', icon: '⚙️', cmd: 'regedit', desc: 'Windows Registry configuration' },
+    { id: 'services', name: 'Services', category: 'Admin Tools', icon: '🔧', cmd: 'services.msc', desc: 'Background Windows system services' },
+    { id: 'explorer', name: 'File Explorer', category: 'Utilities', icon: '📁', cmd: 'explorer', desc: 'Browse folders, network drives' },
+    { id: 'notepad', name: 'Notepad', category: 'Utilities', icon: '📝', cmd: 'notepad', desc: 'Fast text & code editor' },
+    { id: 'calc', name: 'Calculator', category: 'Utilities', icon: '🔢', cmd: 'calc', desc: 'Standard & scientific calculator' },
+    { id: 'mstsc', name: 'Remote Desktop', category: 'Utilities', icon: '🕸️', cmd: 'mstsc', desc: 'Nested RDP client inside Windows' },
+  ];
+
+  const adminTools = tools.filter(t => t.category === 'Admin Tools');
+  const utilTools = tools.filter(t => t.category === 'Utilities');
+
   container.innerHTML = `
-    <div style="text-align: center; padding: 60px 20px; color: var(--text-muted);">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px; opacity: 0.6;">
-        <rect x="3" y="3" width="7" height="7"></rect>
-        <rect x="14" y="3" width="7" height="7"></rect>
-        <rect x="14" y="14" width="7" height="7"></rect>
-        <rect x="3" y="14" width="7" height="7"></rect>
-      </svg>
-      <h3 style="color: #fff; font-size: 16px; margin-bottom: 6px;">Remote Apps</h3>
-      <p style="font-size: 13px;">Publish individual virtual apps or Windows tools from your RDP servers.</p>
+    <div class="apps-hub">
+      <div class="apps-header-bar">
+        <div class="apps-target-group">
+          <label style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Target Remote PC:</label>
+          <select class="apps-target-select" id="appsTargetSelect">
+            ${state.devices.map(d => `<option value="${d.id}" ${d.id === selectedDevId ? 'selected' : ''}>${d.name} (${d.host})</option>`).join('')}
+          </select>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);">
+          Clicking any tool connects to PC and launches the application
+        </div>
+      </div>
+
+      <div>
+        <h3 class="apps-section-title">System &amp; Administration Tools</h3>
+        <div class="apps-grid">
+          ${adminTools.map(t => `
+            <div class="app-tile" onclick="launchAppTool('${t.cmd}', '${t.name}')">
+              <div class="app-tile-icon">${t.icon}</div>
+              <div class="app-tile-name">${t.name}</div>
+              <div class="app-tile-desc">${t.desc}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div>
+        <h3 class="apps-section-title">Utilities &amp; Productivity</h3>
+        <div class="apps-grid">
+          ${utilTools.map(t => `
+            <div class="app-tile" onclick="launchAppTool('${t.cmd}', '${t.name}')">
+              <div class="app-tile-icon">${t.icon}</div>
+              <div class="app-tile-name">${t.name}</div>
+              <div class="app-tile-desc">${t.desc}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
     </div>
   `;
+}
+
+async function launchAppTool(cmd, name) {
+  const select = document.getElementById('appsTargetSelect');
+  const targetId = select ? select.value : (state.activeSessionId || (state.devices[0] && state.devices[0].id));
+  if (!targetId) return;
+
+  const d = state.devices.find(x => x.id === targetId);
+  if (!d) return;
+
+  showToast(`Launching ${name} on ${d.name}...`);
+
+  // Connect or switch
+  if (!state.activeSessions.has(targetId)) {
+    await initiateConnection(targetId);
+  } else {
+    switchToSession(targetId);
+  }
+
+  // Send Windows Run dialog (Win+R) -> cmd -> Enter
+  setTimeout(() => {
+    if (typeof window.rdpKeyDown === 'function') {
+      window.rdpKeyDown(targetId, 'MetaLeft');
+      window.rdpKeyDown(targetId, 'KeyR');
+      setTimeout(() => {
+        window.rdpKeyUp(targetId, 'KeyR');
+        window.rdpKeyUp(targetId, 'MetaLeft');
+
+        setTimeout(() => {
+          for (let i = 0; i < cmd.length; i++) {
+            const char = cmd[i];
+            let keyCode = 'Key' + char.toUpperCase();
+            if (char === '.') keyCode = 'Period';
+            else if (char === ':') keyCode = 'Semicolon';
+            
+            setTimeout(() => {
+              window.rdpKeyDown(targetId, keyCode);
+              setTimeout(() => window.rdpKeyUp(targetId, keyCode), 25);
+            }, i * 35);
+          }
+
+          setTimeout(() => {
+            window.rdpKeyDown(targetId, 'Enter');
+            setTimeout(() => window.rdpKeyUp(targetId, 'Enter'), 40);
+          }, cmd.length * 35 + 80);
+
+        }, 400);
+      }, 100);
+    }
+  }, 1200);
 }
 
 // Card HTML
@@ -333,6 +446,11 @@ function createCardHtml(d) {
         </div>
 
         <div class="card-hover-actions">
+          ${d.macAddress && !isOnline ? `
+            <button class="hover-action-btn wol" onclick="wakeDevice(event, '${d.macAddress}', '${d.name}')" title="Wake PC (Wake-on-LAN ⚡)">
+              ⚡
+            </button>
+          ` : ''}
           <button class="hover-action-btn connect" onclick="startConnect(event, '${d.id}')" title="${isRunning ? 'Switch to Session' : 'Connect to PC'}">
             ${isRunning ? '👁️' : '▶'}
           </button>
@@ -385,13 +503,32 @@ async function toggleFav(event, id) {
   }
 }
 
+async function wakeDevice(event, mac, name) {
+  event.stopPropagation();
+  try {
+    const res = await fetch('/api/wol', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac }),
+    });
+    if (res.ok) {
+      showToast(`⚡ Wake-on-LAN magic packet sent to ${name} (${mac})`);
+    } else {
+      const err = await res.text();
+      showToast(`Wake-on-LAN failed: ${err}`);
+    }
+  } catch (e) {
+    showToast(`Wake-on-LAN error: ${e.message}`);
+  }
+}
+
 function startConnect(event, id) {
   event.stopPropagation();
   initiateConnection(id);
 }
 
 // Start connection logic
-function initiateConnection(id) {
+async function initiateConnection(id) {
   const d = state.devices.find(x => x.id === id);
   if (!d) return;
 
@@ -399,6 +536,22 @@ function initiateConnection(id) {
   if (state.activeSessions.has(id)) {
     switchToSession(id);
     return;
+  }
+
+  // If credentials are blank or masked, fetch from secure credentials API
+  if (!d.password || d.password === '••••••••') {
+    try {
+      const res = await fetch(`/api/devices/${id}/credentials`);
+      if (res.ok) {
+        const creds = await res.json();
+        if (creds.hasPassword) {
+          d.password = creds.password;
+          d.username = creds.username || d.username;
+          connectToDevice(d);
+          return;
+        }
+      }
+    } catch (_) {}
   }
 
   // If credentials missing, prompt
@@ -764,6 +917,12 @@ function setupSessionBar() {
     showToast('Clipboard synchronized');
   });
 
+  // Files bridge button
+  const filesBtn = document.getElementById('sessionFilesBtn');
+  if (filesBtn) {
+    filesBtn.addEventListener('click', () => openFileSharingModal());
+  }
+
   // Fullscreen
   document.getElementById('sessionFullscreenBtn').addEventListener('click', () => {
     if (!document.fullscreenElement) {
@@ -814,6 +973,8 @@ function setupModal() {
       width: parseInt(document.getElementById('devWidth').value) || 1440,
       height: parseInt(document.getElementById('devHeight').value) || 900,
       swapAltMeta: document.getElementById('devSwapAltMeta').checked,
+      macShortcuts: document.getElementById('devMacShortcuts').checked,
+      macAddress: document.getElementById('devMacAddress').value.trim(),
       enableAudio: document.getElementById('devEnableAudio').checked,
       favorite: document.getElementById('devFavorite').checked,
     };
@@ -845,7 +1006,7 @@ function setupModal() {
 function openDeviceModal(device = null) {
   const modal = document.getElementById('deviceModal');
   document.getElementById('modalTitle').textContent = device ? 'Edit PC Connection' : 'Add PC Connection';
-  document.getElementById('devId').value = device ? device.id : '';
+  document.getElementById('devId').value = device ? (device.id || '') : '';
   document.getElementById('devName').value = device ? device.name : '';
   document.getElementById('devHost').value = device ? device.host : '';
   document.getElementById('devPort').value = device ? (device.port || 3389) : 3389;
@@ -856,6 +1017,8 @@ function openDeviceModal(device = null) {
   document.getElementById('devWidth').value = device ? (device.width || 1440) : 1440;
   document.getElementById('devHeight').value = device ? (device.height || 900) : 900;
   document.getElementById('devSwapAltMeta').checked = device ? (device.swapAltMeta ?? false) : false;
+  document.getElementById('devMacShortcuts').checked = device ? (device.macShortcuts ?? true) : true;
+  document.getElementById('devMacAddress').value = device ? (device.macAddress || '') : '';
   document.getElementById('devEnableAudio').checked = device ? (device.enableAudio ?? true) : true;
   document.getElementById('devFavorite').checked = device ? !!device.favorite : false;
 
@@ -882,6 +1045,301 @@ async function deleteDevice(event, id) {
     }
   } catch (e) {
     showToast('Silme işlemi başarısız');
+  }
+}
+
+// LAN Auto-Discovery Modal Setup
+function setupDiscoveryModal() {
+  const modal = document.getElementById('discoveryModal');
+  const closeBtn = document.getElementById('discoveryCloseBtn');
+  const doneBtn = document.getElementById('discoveryDoneBtn');
+  const startBtn = document.getElementById('startScanBtn');
+  const subnetInput = document.getElementById('scanSubnetInput');
+
+  const close = () => modal.classList.remove('active');
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  if (doneBtn) doneBtn.addEventListener('click', close);
+
+  if (startBtn) {
+    startBtn.addEventListener('click', async () => {
+      const subnet = subnetInput ? subnetInput.value.trim() : '';
+      const resultsContainer = document.getElementById('discoveryResults');
+      const scanBtnText = document.getElementById('scanBtnText');
+
+      scanBtnText.textContent = 'Scanning...';
+      startBtn.disabled = true;
+      resultsContainer.innerHTML = `
+        <div style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px;">
+          <span style="display: inline-block; animation: pulseGreen 1s infinite;">🔍</span>
+          Scanning network for port 3389 (RDP)...
+        </div>
+      `;
+
+      try {
+        const url = subnet ? `/api/discover?subnet=${encodeURIComponent(subnet)}` : '/api/discover';
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Scan failed');
+        const hosts = await res.json();
+
+        if (hosts.length === 0) {
+          resultsContainer.innerHTML = `
+            <div style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px;">
+              No active RDP hosts found in this subnet.
+            </div>
+          `;
+        } else {
+          let html = `
+            <table class="discovery-table">
+              <thead>
+                <tr>
+                  <th>Host / IP</th>
+                  <th>Computer Name</th>
+                  <th>Latency</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+          `;
+          hosts.forEach(h => {
+            const isSaved = state.devices.some(d => d.host === h.ip);
+            html += `
+              <tr>
+                <td><strong>${h.ip}</strong></td>
+                <td>${h.hostname || '<span style="color: var(--text-muted);">Windows PC</span>'}</td>
+                <td><span class="discovery-badge">${h.latencyMs}ms</span></td>
+                <td>
+                  <div style="display: flex; gap: 6px;">
+                    ${isSaved ? `
+                      <span style="font-size: 11px; color: var(--text-muted); padding: 4px 6px;">In catalog</span>
+                    ` : `
+                      <button class="btn btn-primary" style="padding: 3px 9px; font-size: 11px; border-radius: 6px;" onclick="addDiscoveredHost('${h.ip}', '${h.hostname || ''}')">
+                        + Add PC
+                      </button>
+                    `}
+                    <button class="btn btn-secondary" style="padding: 3px 9px; font-size: 11px; border-radius: 6px;" onclick="connectDiscoveredHost('${h.ip}', '${h.hostname || ''}')">
+                      ▶ Connect
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          });
+          html += `</tbody></table>`;
+          resultsContainer.innerHTML = html;
+        }
+      } catch (err) {
+        resultsContainer.innerHTML = `
+          <div style="text-align: center; padding: 30px; color: var(--offline-red); font-size: 13px;">
+            Error scanning network: ${err.message}
+          </div>
+        `;
+      } finally {
+        scanBtnText.textContent = 'Scan Network';
+        startBtn.disabled = false;
+      }
+    });
+  }
+}
+
+function openDiscoveryModal() {
+  const modal = document.getElementById('discoveryModal');
+  if (modal) {
+    modal.classList.add('active');
+    const startBtn = document.getElementById('startScanBtn');
+    if (startBtn) startBtn.click();
+  }
+}
+
+function addDiscoveredHost(ip, hostname) {
+  document.getElementById('discoveryModal').classList.remove('active');
+  openDeviceModal({
+    name: hostname || `PC (${ip})`,
+    host: ip,
+    port: 3389,
+    group: 'Discovered PCs',
+    macShortcuts: true,
+  });
+}
+
+async function connectDiscoveredHost(ip, hostname) {
+  document.getElementById('discoveryModal').classList.remove('active');
+  let d = state.devices.find(x => x.host === ip);
+  if (!d) {
+    d = {
+      id: `dev_${Date.now()}`,
+      name: hostname || `PC (${ip})`,
+      host: ip,
+      port: 3389,
+      group: 'Discovered PCs',
+      macShortcuts: true,
+      width: 1440,
+      height: 900,
+    };
+    state.devices.push(d);
+  }
+  initiateConnection(d.id);
+}
+
+// File Sharing & Drop Bridge Setup
+function setupFileSharing() {
+  const modal = document.getElementById('fileSharingModal');
+  const closeBtn = document.getElementById('fileSharingCloseBtn');
+  const doneBtn = document.getElementById('fileSharingDoneBtn');
+  const filePicker = document.getElementById('filePickerInput');
+  const dropZone = document.getElementById('fileUploadZone');
+  const sessionView = document.getElementById('rdpSessionView');
+  const dropOverlay = document.getElementById('fileDropOverlay');
+
+  const close = () => modal.classList.remove('active');
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  if (doneBtn) doneBtn.addEventListener('click', close);
+
+  if (filePicker) {
+    filePicker.addEventListener('change', async (e) => {
+      if (e.target.files && e.target.files[0]) {
+        await uploadSharedFile(e.target.files[0]);
+        filePicker.value = '';
+      }
+    });
+  }
+
+  // Drag & drop over Modal zone
+  if (dropZone) {
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.style.borderColor = 'var(--accent)';
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.borderColor = '';
+    });
+    dropZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropZone.style.borderColor = '';
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        await uploadSharedFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  // Drag & drop over entire active RDP session window
+  if (sessionView) {
+    let dragCounter = 0;
+    sessionView.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      if (dropOverlay) dropOverlay.classList.add('active');
+    });
+    sessionView.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0 && dropOverlay) {
+        dropOverlay.classList.remove('active');
+        dragCounter = 0;
+      }
+    });
+    sessionView.addEventListener('dragover', (e) => {
+      e.preventDefault();
+    });
+    sessionView.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      if (dropOverlay) dropOverlay.classList.remove('active');
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        await uploadSharedFile(e.dataTransfer.files[0]);
+        openFileSharingModal();
+      }
+    });
+  }
+}
+
+async function uploadSharedFile(file) {
+  showToast(`Uploading ${file.name}...`);
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/files/upload', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) throw new Error('Upload failed');
+    const data = await res.json();
+    showToast(`✅ File "${data.name}" shared! Link ready.`);
+    await loadSharedFilesList();
+  } catch (err) {
+    showToast(`Upload failed: ${err.message}`);
+  }
+}
+
+async function loadSharedFilesList() {
+  const container = document.getElementById('sharedFilesList');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/files/list');
+    if (!res.ok) return;
+    const files = await res.json();
+
+    if (files.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;">
+          No shared files yet. Drop a file to share.
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    const hostUrl = window.location.origin;
+    files.forEach(f => {
+      const fullUrl = hostUrl + f.downloadUrl;
+      html += `
+        <div class="shared-file-item">
+          <div class="shared-file-info">
+            <span class="shared-file-name" title="${f.name}">${f.name}</span>
+            <span class="shared-file-meta">${f.sizeDisplay} • ${f.uploadedAt}</span>
+          </div>
+          <div class="shared-file-actions">
+            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="copyFileDownloadLink('${fullUrl}')" title="Copy URL to paste in Windows">
+              📋 Copy Link
+            </button>
+            <a href="${f.downloadUrl}" target="_blank" class="btn btn-primary" style="padding: 3px 8px; font-size: 11px; text-decoration: none;" download>
+              ⬇
+            </a>
+            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: var(--offline-red);" onclick="deleteSharedFile('${f.name}')">
+              ✕
+            </button>
+          </div>
+        </div>
+      `;
+    });
+    container.innerHTML = html;
+  } catch (_) {}
+}
+
+function copyFileDownloadLink(url) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('Download link copied! Paste into remote Windows browser.');
+    });
+  } else {
+    prompt('Download Link:', url);
+  }
+}
+
+async function deleteSharedFile(filename) {
+  try {
+    await fetch(`/api/files/delete/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    await loadSharedFilesList();
+    showToast(`Deleted ${filename}`);
+  } catch (_) {}
+}
+
+function openFileSharingModal() {
+  const modal = document.getElementById('fileSharingModal');
+  if (modal) {
+    modal.classList.add('active');
+    loadSharedFilesList();
   }
 }
 

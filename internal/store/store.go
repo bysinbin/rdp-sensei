@@ -22,6 +22,8 @@ type Device struct {
 	Width         int    `json:"width"`
 	Height        int    `json:"height"`
 	SwapAltMeta   bool   `json:"swapAltMeta"`
+	MacShortcuts  bool   `json:"macShortcuts"`
+	MacAddress    string `json:"macAddress,omitempty"`
 	EnableAudio   bool   `json:"enableAudio"`
 	Thumbnail     string `json:"thumbnail"`
 	LastConnected string `json:"lastConnected"`
@@ -65,6 +67,10 @@ func NewStore(dataDir string) (*Store, error) {
 	return s, nil
 }
 
+func (s *Store) DataDir() string {
+	return filepath.Dir(s.filePath)
+}
+
 func (s *Store) load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -86,6 +92,9 @@ func (s *Store) load() error {
 
 	s.devices = make(map[string]*Device)
 	for _, d := range list {
+		if pass, err := GetPasswordFromKeychain(d.ID); err == nil && pass != "" {
+			d.Password = pass
+		}
 		s.devices[d.ID] = d
 	}
 	return nil
@@ -168,6 +177,10 @@ func (s *Store) Save(d *Device) error {
 		d.Group = "Saved Devices"
 	}
 
+	if d.Password != "" {
+		_ = SavePasswordToKeychain(d.ID, d.Password)
+	}
+
 	s.devices[d.ID] = d
 	return s.saveLocked()
 }
@@ -176,6 +189,7 @@ func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	_ = DeletePasswordFromKeychain(id)
 	delete(s.devices, id)
 	return s.saveLocked()
 }

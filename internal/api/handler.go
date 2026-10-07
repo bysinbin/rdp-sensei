@@ -26,6 +26,12 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/devices/", h.handleDeviceByID)
 	mux.HandleFunc("/api/ping", h.handlePingAll)
 	mux.HandleFunc("/api/system", h.handleSystemInfo)
+	mux.HandleFunc("/api/discover", HandleDiscover)
+	mux.HandleFunc("/api/wol", HandleWakeOnLan)
+	mux.HandleFunc("/api/files/upload", h.handleFileUpload)
+	mux.HandleFunc("/api/files/list", h.handleFileList)
+	mux.HandleFunc("/api/files/download/", h.handleFileDownload)
+	mux.HandleFunc("/api/files/delete/", h.handleFileDelete)
 }
 
 func jsonResponse(w http.ResponseWriter, status int, data any) {
@@ -38,6 +44,11 @@ func (h *APIHandler) handleDevices(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		devices := h.store.GetAll()
+		for _, d := range devices {
+			if d.Password != "" {
+				d.Password = "••••••••"
+			}
+		}
 		jsonResponse(w, http.StatusOK, devices)
 
 	case http.MethodPost:
@@ -54,7 +65,11 @@ func (h *APIHandler) handleDevices(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		jsonResponse(w, http.StatusCreated, dev)
+		respDev := dev
+		if respDev.Password != "" {
+			respDev.Password = "••••••••"
+		}
+		jsonResponse(w, http.StatusCreated, respDev)
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -71,7 +86,7 @@ func (h *APIHandler) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sub-actions: /api/devices/{id}/favorite or /api/devices/{id}/touch
+	// Sub-actions: /api/devices/{id}/favorite, /api/devices/{id}/touch, /api/devices/{id}/credentials
 	if len(parts) > 1 {
 		subAction := parts[1]
 		switch subAction {
@@ -96,6 +111,25 @@ func (h *APIHandler) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 			h.store.UpdateLastConnected(id)
 			jsonResponse(w, http.StatusOK, map[string]any{"id": id, "touched": true})
 			return
+
+		case "credentials":
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			dev, found := h.store.Get(id)
+			if !found {
+				http.Error(w, "device not found", http.StatusNotFound)
+				return
+			}
+			jsonResponse(w, http.StatusOK, map[string]any{
+				"id":          dev.ID,
+				"username":    dev.Username,
+				"password":    dev.Password,
+				"domain":      dev.Domain,
+				"hasPassword": dev.Password != "",
+			})
+			return
 		}
 	}
 
@@ -106,7 +140,11 @@ func (h *APIHandler) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "device not found", http.StatusNotFound)
 			return
 		}
-		jsonResponse(w, http.StatusOK, dev)
+		respDev := *dev
+		if respDev.Password != "" {
+			respDev.Password = "••••••••"
+		}
+		jsonResponse(w, http.StatusOK, respDev)
 
 	case http.MethodPut:
 		var dev store.Device
@@ -115,11 +153,23 @@ func (h *APIHandler) handleDeviceByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dev.ID = id
+
+		// If password is masked or unchanged, keep existing password
+		if dev.Password == "••••••••" || dev.Password == "" {
+			if existing, ok := h.store.Get(id); ok && existing.Password != "" {
+				dev.Password = existing.Password
+			}
+		}
+
 		if err := h.store.Save(&dev); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		jsonResponse(w, http.StatusOK, dev)
+		respDev := dev
+		if respDev.Password != "" {
+			respDev.Password = "••••••••"
+		}
+		jsonResponse(w, http.StatusOK, respDev)
 
 	case http.MethodDelete:
 		if err := h.store.Delete(id); err != nil {
